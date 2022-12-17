@@ -1,0 +1,352 @@
+---
+title: "Unsupervised Machine Learning: Análise de Clusters, pt. I"
+output: html_notebook
+---
+
+Material retirado da aula de MBA em Data Science & Analytics, Esalq/USP. Aluna: Larissa Chacon Finzeto
+
+---
+
+Para estudarmos como realizar uma análise de clusters, vamos carregar um pequeno banco de dados com notas de vestibular de 3 disciplinas (variáveis), de 5 alunos diferentes (observações). O objetivo é agrupar alunos com desempenho semelhante.
+
+A princípio, vamos selecionar e instalar quais pacotes serão necessários para a análise:
+
+```{r}
+
+pacotes <- c("plotly",           #Plataforma gráfica
+             "tidyverse",        #carregar outros pacotes do R
+             "ggerepel",         #Geoms de texto e rótulos para 'ggplot2' que evitam a sobreposição de texto
+             "knitr",
+             "kableExtra",       #Formatação de tabelas
+             "reshape2",         #Função 'melt'    
+             "misc3d",           #Gráficos 3D
+             "plot3D",           #Gráficos 3D
+             "cluster",          #Função 'agnes' para elaboração de clusters hierárquicos
+             "factoextra",       #Função 'fviz_dend' para a elaboração de dendrogramas
+             "ade4")             #Função 'ade4' para matriz de distâncias em variáveis binárias
+
+if(sum(as.numeric(!pacotes %in% installed.packages())) != 0){
+  instalador <- pacotes[!pacotes %in% installed.packages()]
+  for(i in 1:length(instalador)) {
+    install.packages(instalador, dependencies = T)
+    break()}
+  sapply(pacotes, require, character = T) 
+} else {
+  sapply(pacotes, require, character = T) 
+}
+
+```
+Vamos carregar e visualizar a base de dados Vestibular:
+
+```{r}
+load(file = "Vestibular.RData")
+
+Vestibular %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE,
+                font_size = 20)
+
+```
+
+Vamos plotar, para melhor visualização, um gráfico 3D com scatter, para identificarmos a posição de cada estudante em relação às disciplinas:
+
+```{r}
+
+rownames(Vestibular) <- Vestibular$estudante
+
+scatter3D(x=Vestibular$fisica,
+          y=Vestibular$matematica,
+          z=Vestibular$quimica,
+          phi = 0, bty = "g", pch = 20, cex = 2,
+          xlab = "Física",
+          ylab = "Matemática",
+          zlab = "Química",
+          main = "Vestibular",
+          clab = "Nota de Química")>
+  text3D(x=Vestibular$fisica,
+         y=Vestibular$matematica,
+         z=Vestibular$quimica,
+         labels = rownames(Vestibular),
+         add = TRUE, cex = 1)
+
+```
+
+Vamos observar as estatísticas descritivas totais do dataset:
+
+```{r}
+
+summary(Vestibular)
+
+```
+
+Geralmente, para análise de cluster, padronizamos as medidas em ZScore. Contudo, aqui não será necessário, pois todas já estão na mesma unidade de medida.
+
+Vamos transformar em outro dataset apenas para demonstração da função:
+
+```{r}
+
+vest_padronizado <- as.data.frame(scale(Vestibular[,2:4]))
+rownames(vest_padronizado) <- Vestibular$estudante
+
+vest_padronizado
+
+```
+Vamos plotar as estatísticas descritivas em um gráfico interativo, com ggplotly:
+
+```{r}
+ggplotly(
+  Vestibular %>%
+    melt() %>%
+    ggplot(aes(label = estudante)) +
+    geom_boxplot(aes(x = variable, y = value, fill = variable)) +
+    geom_point(aes(x = variable, y = value), alpha = 0.5) +
+    labs(x = "Variável",
+         y = "Nota") +
+    scale_fill_manual("Legenda:",
+                      values = c("orange", "purple", "bisque4")) +
+    theme_bw()
+)
+```
+ESQUEMA DE AGLOMERAÇÃO HIERÁRQUICO
+
+Vamos iniciar agora o esquema de aglomeração hieráriquico, de fato. 
+
+1. A primeira parte, já feita, é a análise das unidades de medidas, na qual geralmente padronizamos em ZScore. 
+
+2. Em seguida, devemos escolher qual será a MEDIDA DE DISSIMILARIDADE que utilizaremos. A medida de dissimilaridade refere-se à distância entre as observações, com base nas variáveis escolhidas. Portanto, indica o quanto as observações são diferentes entre si.
+
+Neste projeto, vamos utilizar a Medida Euclidiana:
+
+```{r}
+matriz_D <- Vestibular %>% 
+  select(matematica, fisica, quimica) %>% 
+  dist(method = "euclidean")
+
+matriz_D
+```
+Vamos elaborar a matriz em uma melhor visualização:
+
+```{r}
+data.matrix(matriz_D) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                font_size = 20)
+
+```
+
+Agora a elaboração da clusterização hieráriquica, no qual iremos utilizar como método de encadeamento o Single Linkage ou Nearest Neighboor:
+
+```{r}
+
+cluster_hier <- agnes(x = matriz_D, method = "single")
+cluster_hier
+
+```
+
+Vamos extrair algumas informações do nosso interesse:
+
+1. COEFICIENTES: os valores das distâncias em que ocorreram as junções no esquema de clusterização:
+
+```{r}
+
+coeficientes <- sort(cluster_hier$height, decreasing = FALSE)
+coeficientes
+
+```
+Em seguida, vamos extrair as junções do esquema hierárquico.
+
+```{r}
+
+esquema <- as.data.frame(cbind(cluster_hier$merge, coeficientes))
+names(esquema) <- c("Cluster1", "Cluster2", "Coeficientes")
+esquema
+
+```
+
+Quando os valores em Cluster 1 e 2 forem negativos, significa junções de observações;
+Quando forem positivos, significa o cluster formado naquele estágio.
+
+(-) O sinal negativo significa a observação por si só.
+(+) O sinal positivo significa o cluster ao qual ele se refere.
+
+-1: OBSERVAÇÃO 1
+1: CLUSTER 1
+
+Visualização em tabela:
+
+```{r}
+esquema %>%
+  kable(row.names = T) %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                font_size = 20)
+```
+
+Vamos construir o dendrograma para visualização das etapas de formação dos clusters:
+
+```{r}
+dev.off()
+fviz_dend(x = cluster_hier)
+```
+Após edição:
+
+```{r}
+
+fviz_dend(x = cluster_hier,
+          k = 3, #pintar os clusters formados
+          k_colors = c("deeppink4", "darkviolet", "deeppink"),
+          color_labels_by_k = F,
+          rect = T,
+          rect_fill = T,
+          lwd = 1,
+          ggtheme = theme_bw())
+```
+Agora vamos adicionar ao banco de dados original, uma variável do nº de clusters, com a função cutree(), a qual indicará a qual cluster cada observação pertence.
+
+```{r}
+
+Vestibular$cluster_H <- factor(cutree(tree = cluster_hier, k = 3))
+Vestibular
+                               
+```
+Vamos agora gerar as estatísticas descritivas, considerando o agrupamento realizado:
+
+1. Primeiro para a variável matemática:
+
+```{r}
+
+group_by(Vestibular, cluster_H) %>%
+  summarise(
+    mean = mean(matematica, na.rm = TRUE),
+    sd = sd(matematica, na.rm = TRUE),
+    min = min(matematica, na.rm = TRUE),
+    max = max(matematica, na.rm = TRUE))
+
+```
+2. Segundo para a variável Física:
+
+```{r}
+
+group_by(Vestibular, cluster_H) %>%
+  summarise(
+    mean = mean(fisica, na.rm = TRUE),
+    sd = sd(fisica, na.rm = TRUE),
+    min = min(fisica, na.rm = TRUE),
+    max = max(fisica, na.rm = TRUE))
+
+```
+Terceiro para a variável Química:
+
+```{r}
+
+group_by(Vestibular, cluster_H) %>%
+  summarise(
+    mean = mean(quimica, na.rm = TRUE),
+    sd = sd(quimica, na.rm = TRUE),
+    min = min(quimica, na.rm = TRUE),
+    max = max(quimica, na.rm = TRUE))
+
+```
+
+Após realizar a clusterização, é importante realizar a Análise de Variância de 1 fator (ANOVA), a qual indica qual(is) variável(is) contribuiu(íram) mais para a formação dos clusters; qual teve maior peso?
+
+ANOVA da variável 'matematica'
+
+```{r}
+summary(anova_matematica <- aov(formula = matematica ~ cluster_H,
+                                data = Vestibular))
+
+```
+ANOVA da variável 'fisica'
+
+```{r}
+summary(anova_fisica <- aov(formula = fisica ~ cluster_H,
+                            data = Vestibular))
+```
+ANOVA da variável 'quimica'
+
+```{r}
+summary(anova_quimica <- aov(formula = quimica ~ cluster_H,
+                             data = Vestibular))
+```
+ESQUEMA DE AGLOMERAÇÃO NÃO-HIERÁRQUICO
+
+1. Neste esquema, a primeira parte também deverá ser a padronização das unidades de medida das variáveis em ZScore.
+
+2. Em seguida, vamos elaborar os clusters definindo quantos clusters queremos.
+
+```{r}
+cluster_kmeans <- kmeans(Vestibular[,2:4],
+                         centers = 3)
+
+cluster_kmeans
+```
+Aplicamos o número 3 como input no método não-hierárquico, pois foi o nosso output no método hierárquico. Mas se não houvéssemos feito o primeiro método antes, como saber qual o k ótimo para aplicar?
+
+Podemos, neste caso, utilizar o método Elbow, onde a dobra do gráfico permite identificar o número ótimo de clusters.
+
+```{r}
+fviz_nbclust(Vestibular[,2:4], kmeans, method = "wss", k.max = 4)
+```
+
+Agora vamos criar mais uma variável categórica para indicação do cluster no banco de dados originial e comprar a atuação dos dois métodos:
+
+```{r}
+
+Vestibular$cluster_K <- factor(cluster_kmeans$cluster)
+
+Vestibular %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE,
+                font_size = 20)
+
+Vestibular
+
+```
+Aqui podemos notar que os resultados foram os mesmos, pois as observações foram alocadas nos mesmos clusters.
+
+Ao analisar a variância de um fator para o método não-hierárquico, também vemos que os resultados são os mesmos.
+
+ANOVA da variável 'matematica':
+
+```{r}
+summary(anova_matematica <- aov(formula = matematica ~ cluster_K,
+                                data = Vestibular))
+```
+ANOVA da variável 'fisica':
+
+```{r}
+summary(anova_fisica <- aov(formula = fisica ~ cluster_K,
+                            data = Vestibular))
+```
+
+ANOVA da variável 'quimica':
+
+```{r}
+summary(anova_quimica <- aov(formula = quimica ~ cluster_K,
+                             data = Vestibular))
+```
+Comparando os resultados dos esquemas hierárquico e não hierárquico
+
+```{r}
+
+Vestibular %>%
+  select(estudante, cluster_H, cluster_K) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped",
+                full_width = FALSE,
+                font_size = 20)
+
+# Ou para rápida visualização
+
+novo_vest <- Vestibular %>% select(estudante, cluster_H, cluster_K)
+novo_vest
+```
+FIM
+
+
+
+
